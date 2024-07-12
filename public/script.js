@@ -18,6 +18,7 @@ window.play = function(index) {
     audioPlayer.play();
     updateNowPlaying();
     updateProgressBar();
+    sendRemoteUpdate('updateNowPlaying', { track: currentTrack.filename });
 }
 
 window.stop = function() {
@@ -25,16 +26,19 @@ window.stop = function() {
     audioPlayer.pause();
     audioPlayer.currentTime = 0;
     updateNowPlaying();
+    sendRemoteUpdate('updateNowPlaying', { track: null });
 }
 
 window.pause = function() {
     console.log('Pausing playback');
     audioPlayer.pause();
+    sendRemoteUpdate('updateNowPlaying', { track: currentTrack ? currentTrack.filename : null });
 }
 
 window.resume = function() {
     console.log('Resuming playback');
     audioPlayer.play();
+    sendRemoteUpdate('updateNowPlaying', { track: currentTrack ? currentTrack.filename : null });
 }
 
 window.rate = function(rating) {
@@ -89,6 +93,7 @@ function updateProgressBar() {
         progressBar.style.width = `${percent}%`;
         currentTime.textContent = formatTime(audioPlayer.currentTime);
         totalTime.textContent = formatTime(audioPlayer.duration);
+        sendRemoteUpdate('updateProgress', { currentTime: audioPlayer.currentTime, duration: audioPlayer.duration });
     } else {
         progressBar.style.width = '0%';
         currentTime.textContent = '0:00';
@@ -112,7 +117,6 @@ function updatePlaylist(playlistToShow) {
         li.innerHTML = `
             <span class="w-1/3">${track.filename}</span>
             <span class="w-1/3 text-center" style="white-space: pre; overflow: hidden;">${track.genre}</span>
-            
             <span class="w-1/6 text-center text-green-500">${track.rating}</span>
         `;
         li.onclick = () => play(playlist.indexOf(track));
@@ -152,6 +156,10 @@ function getFilteredPlaylist() {
     }
 }
 
+function sendRemoteUpdate(action, data) {
+    ws.send(JSON.stringify({ action, ...data }));
+}
+
 // Setup audio player event listeners
 audioPlayer.addEventListener('timeupdate', updateProgressBar);
 audioPlayer.addEventListener('ended', () => {
@@ -179,7 +187,6 @@ document.addEventListener('keydown', (event) => {
             rate(parseInt(event.key));
             break;
         case '`':
-            // rate('Unrated');
             rate(0);
             break;
         case 'ArrowLeft':
@@ -207,7 +214,7 @@ document.addEventListener('keydown', (event) => {
 });
 
 function connectWebSocket() {
-    ws = new WebSocket('ws://localhost:3000');
+    ws = new WebSocket('ws://localhost:3000/desktop');
 
     ws.onmessage = function(event) {
         const data = JSON.parse(event.data);
@@ -226,6 +233,28 @@ function connectWebSocket() {
                 applyFilter();
                 showToast(`Rating updated to: ${data.updatedRating}`);
                 playNextTrack(data.updatedTrackIndex);
+                break;
+            case 'play':
+                if (currentTrack) audioPlayer.play();
+                break;
+            case 'pause':
+                audioPlayer.pause();
+                break;
+            case 'stop':
+                stop();
+                break;
+            case 'skip':
+                skip(data.value);
+                break;
+            case 'previousTrack':
+                const prevFilteredPlaylist = getFilteredPlaylist();
+                const prevCurrentFilteredIndex = prevFilteredPlaylist.findIndex(track => track === currentTrack);
+                if (prevCurrentFilteredIndex > 0) play(playlist.indexOf(prevFilteredPlaylist[prevCurrentFilteredIndex - 1]));
+                break;
+            case 'nextTrack':
+                const nextFilteredPlaylist = getFilteredPlaylist();
+                const nextCurrentFilteredIndex = nextFilteredPlaylist.findIndex(track => track === currentTrack);
+                if (nextCurrentFilteredIndex < nextFilteredPlaylist.length - 1) play(playlist.indexOf(nextFilteredPlaylist[nextCurrentFilteredIndex + 1]));
                 break;
         }
     };

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MP3 Player Remote Control</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-900 text-white">
+    <div class="container mx-auto p-4">
+        <h1 id="mp3-player" class="text-4xl font-bold mb-4">MP3 Player Remote Control</h1>
+
+        <div class="mb-4">
+            <h2 id="now-playing" class="text-2xl font-bold">Now Playing: <span id="nowPlaying" class="text-green-500"></span></h2>
+            <div class="mt-2 bg-gray-700 rounded-full h-2 overflow-hidden">
+                <div id="progressBar" class="bg-green-500 h-full w-0"></div>
+            </div>
+            <div class="flex justify-between mt-1">
+                <span id="currentTime">0:00</span>
+                <span id="totalTime">0:00</span>
+            </div>
+            <div class="mb-4 flex space-x-2">
+                <button onclick="sendCommand('skip', -30)" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">-30s</button>
+                <button onclick="sendCommand('pause')" class="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded">Pause</button>
+                <button onclick="sendCommand('play')" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">Play</button>
+                <button onclick="sendCommand('stop')" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Stop</button>
+                <button onclick="sendCommand('skip', 30)" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">+30s</button>
+            </div>
+            <div class="flex space-x-2 mt-2">
+                <button onclick="sendCommand('rate', 0)" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">0</button>
+                <button onclick="sendCommand('rate', 1)" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">⭐</button>
+                <button onclick="sendCommand('rate', 2)" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">⭐⭐</button>
+                <button onclick="sendCommand('rate', 3)" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">⭐⭐⭐</button>
+                <button onclick="sendCommand('rate', 4)" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">⭐⭐⭐⭐</button>
+                <button onclick="sendCommand('rate', 5)" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">⭐⭐⭐⭐⭐</button>
+            </div>
+        </div>
+
+        <div class="mb-4">
+            <h2 id="playlist" class="text-2xl font-bold mb-2">Playlist Navigation</h2>
+            <div class="flex space-x-2 mb-2">
+                <button onclick="sendCommand('previousTrack')" class="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded">Previous Track</button>
+                <button onclick="sendCommand('nextTrack')" class="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded">Next Track</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="fixed bottom-4 right-4 bg-green-500 text-white p-2 rounded hidden"></div>
+
+    <script>
+        let ws;
+        let currentTrack = null;
+
+        function connectWebSocket() {
+            ws = new WebSocket('ws://' + window.location.host);
+
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                console.log('Received WebSocket message:', data.action);
+                switch (data.action) {
+                    case 'updateNowPlaying':
+                        currentTrack = data.track;
+                        document.getElementById('nowPlaying').textContent = data.track || 'No track playing';
+                        break;
+                    case 'updateProgress':
+                        updateProgressBar(data.currentTime, data.duration);
+                        break;
+                    case 'playlistUpdated':
+                        showToast(`Rating updated to: ${data.updatedRating}`);
+                        break;
+                }
+            };
+
+            ws.onclose = function() {
+                console.log('WebSocket connection closed. Attempting to reconnect...');
+                setTimeout(connectWebSocket, 1000);
+            };
+        }
+
+        function sendCommand(action, value) {
+            console.log('Sending command:', action, value);
+            ws.send(JSON.stringify({ action, value }));
+        }
+
+        function updateProgressBar(currentTime, duration) {
+            const progressBar = document.getElementById('progressBar');
+            const currentTimeElement = document.getElementById('currentTime');
+            const totalTimeElement = document.getElementById('totalTime');
+
+            const percent = (currentTime / duration) * 100;
+            progressBar.style.width = `${percent}%`;
+            currentTimeElement.textContent = formatTime(currentTime);
+            totalTimeElement.textContent = formatTime(duration);
+        }
+
+        function formatTime(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = Math.floor(seconds % 60);
+            return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+        }
+
+        function showToast(message) {
+            console.log('Showing toast:', message);
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.remove('hidden');
+            setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 3000);
+        }
+
+        connectWebSocket();
+    </script>
+</body>
+</html>

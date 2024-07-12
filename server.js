@@ -9,10 +9,14 @@ const CONFIG_FILE = path.join(__dirname, 'config.json');
 
 let currentFolder = '';
 let playlist = [];
+let desktopClient = null;
+let remoteClients = new Set();
+let currentTrack = null;
 
 function log(message) {
   console.log(`[${new Date().toISOString()}] ${message}`);
 }
+
 
 function saveConfig(folder) {
   log(`Saving config with folder: ${folder}`);
@@ -45,7 +49,6 @@ function loadPlaylist(folder) {
         path: `/music/${encodeURIComponent(file)}`,
         rating: getRating(filepath),
         genre: tags.genre || 'Unknown',
-        // duration: getDuration(filepath),
       };
     });
   log(`Loaded ${playlist.length} tracks`);
@@ -53,21 +56,15 @@ function loadPlaylist(folder) {
 }
 
 function getRating(filepath) {
-  log(`Getting rating for file: ${filepath}`);
+  // log(`Getting rating for file: ${filepath}`);
   const tags = NodeID3.read(filepath);
   if (tags.popularimeter && tags.popularimeter.rating !== undefined) {
     const rating = Math.floor(tags.popularimeter.rating / 51);
-    log(`Rating found: ${rating}`);
+    // log(`Rating found: ${rating}`);
     return rating;
   }
   log('No rating found');
   return 'Unrated';
-}
-
-function getDuration(filepath) {
-  const buffer = fs.readFileSync(filepath);
-  const audioData = NodeID3.getAudioData(buffer);
-  return Math.round(audioData.length / audioData.sampleRate);
 }
 
 function rateTrack(filename, rating) {
@@ -106,12 +103,26 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 app.use(express.static('public'));
+app.get('/remote', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'remote.html'));
+});
 
 // We'll set up the /music route dynamically after the folder is loaded
 let musicRoute = null;
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   log('New WebSocket connection established');
+  
+  // Determine if this is a desktop or remote client
+  const isDesktop = req.url === '/desktop';
+  if (isDesktop) {
+    desktopClient = ws;
+    log('Desktop client connected');
+  } else {
+    remoteClients.add(ws);
+    log('Remote client connected');
+  }
+
   ws.on('message', (message) => {
     const data = JSON.parse(message);
     log(`Received WebSocket message: ${data.action}`);
@@ -129,17 +140,55 @@ wss.on('connection', (ws) => {
         response = { action: 'playlistLoaded', playlist: loadedPlaylist };
         break;
       case 'rate':
-        const result = rateTrack(data.filename, data.rating);
-        response = { 
-          action: 'playlistUpdated', 
-          playlist: result ? result.updatedPlaylist : playlist,
-          updatedRating: result ? result.updatedRating : 'Unrated',
-          updatedTrackIndex: result ? result.updatedTrackIndex : -1
-        };
+        if (currentTrack) {
+          const result = rateTrack(currentTrack.filename, data.rating);
+          response = { 
+            action: 'playlistUpdated', 
+            playlist: result ? result.updatedPlaylist : playlist,
+            updatedRating: result ? result.updatedRating : 'Unrated',
+            updatedTrackIndex: result ? result.updatedTrackIndex : -1
+          };
+          // Broadcast the updated playlist to all clients
+          broadcastToAll(response);
+        } else {
+          log('No track playing to rate');
+        }
+        break;
+      case 'play':
+      case 'pause':
+      case 'stop':
+      case 'skip':
+      case 'previousTrack':
+      case 'nextTrack':
+        // Forward these commands to the desktop client
+        if (desktopClient) {
+          desktopClient.send(JSON.stringify(data));
+        }
+        break;
+      case 'updateNowPlaying':
+        currentTrack = data.track ? playlist.find(track => track.filename === data.track) : null;
+        // Forward these updates to all remote clients
+        broadcastToRemotes(data);
+        break;
+      case 'updateProgress':
+        // Forward these updates to all remote clients
+        broadcastToRemotes(data);
         break;
     }
 
-    ws.send(JSON.stringify(response));
+    if (response) {
+      ws.send(JSON.stringify(response));
+    }
+  });
+
+  ws.on('close', () => {
+    if (isDesktop) {
+      desktopClient = null;
+      log('Desktop client disconnected');
+    } else {
+      remoteClients.delete(ws);
+      log('Remote client disconnected');
+    }
   });
 
   const lastFolder = loadConfig();
@@ -147,6 +196,23 @@ wss.on('connection', (ws) => {
     ws.send(JSON.stringify({ action: 'lastFolder', folder: lastFolder }));
   }
 });
+
+function broadcastToAll(data) {
+  const message = JSON.stringify(data);
+  if (desktopClient) {
+    desktopClient.send(message);
+  }
+  remoteClients.forEach(client => {
+    client.send(message);
+  });
+}
+
+function broadcastToRemotes(data) {
+  const message = JSON.stringify(data);
+  remoteClients.forEach(client => {
+    client.send(message);
+  });
+}
 
 server.listen(3000, () => {
   log('Server is running on http://localhost:3000');
