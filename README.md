@@ -11,6 +11,20 @@ A Node.js-based MP3 player with ID3 tag support, a web GUI, and remote control f
 - Keyboard shortcuts for quick control
 - Real-time updates across all connected devices
 
+## Main Interface
+
+- Load a folder containing MP3 files
+- Play, pause, and stop tracks
+- Skip forward and backward
+- Rate tracks
+- Filter the playlist by rating
+  
+<img width="1564" alt="Screenshot 2024-07-16 at 10 18 44" src="https://github.com/user-attachments/assets/7f5a7a88-9de5-46c4-af77-88fba3779309">
+
+## Remote Control
+
+The remote control interface mirrors the main interface but sends commands to the desktop client instead of directly controlling playback. This allows you to control the MP3 player from any device on your local network.
+
 ## Prerequisites
 
 - Node.js (v12 or higher recommended)
@@ -50,18 +64,6 @@ A Node.js-based MP3 player with ID3 tag support, a web GUI, and remote control f
    http://<desktop-ip-address>:3000/remote
    ```
    Replace `<desktop-ip-address>` with the IP address of your desktop computer on the local network.
-
-## Main Interface
-
-- Load a folder containing MP3 files
-- Play, pause, and stop tracks
-- Skip forward and backward
-- Rate tracks
-- Filter the playlist by rating
-
-## Remote Control
-
-The remote control interface mirrors the main interface but sends commands to the desktop client instead of directly controlling playback. This allows you to control the MP3 player from any device on your local network.
 
 ## Keyboard Shortcuts
 
