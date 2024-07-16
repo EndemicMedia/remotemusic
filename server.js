@@ -63,7 +63,7 @@ function getRating(filepath) {
     // log(`Rating found: ${rating}`);
     return rating;
   }
-  log('No rating found');
+  process.stdout.write('.');
   return 'Unrated';
 }
 
@@ -125,7 +125,7 @@ wss.on('connection', (ws, req) => {
 
   ws.on('message', (message) => {
     const data = JSON.parse(message);
-    log(`Received WebSocket message: ${data.action}`);
+    // log(`Received WebSocket message: ${data.action}`);
     let response;
 
     switch (data.action) {
