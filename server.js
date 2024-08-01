@@ -9,6 +9,7 @@ const CONFIG_FILE = path.join(__dirname, 'config.json');
 
 let currentFolder = '';
 let playlist = [];
+let genres = new Set();
 let desktopClient = null;
 let remoteClients = new Set();
 let currentTrack = null;
@@ -16,7 +17,6 @@ let currentTrack = null;
 function log(message) {
   console.log(`[${new Date().toISOString()}] ${message}`);
 }
-
 
 function saveConfig(folder) {
   log(`Saving config with folder: ${folder}`);
@@ -39,28 +39,29 @@ function loadPlaylist(folder) {
   log(`Loading playlist from folder: ${folder}`);
   currentFolder = folder;
   saveConfig(folder);
+  genres.clear();
   playlist = fs.readdirSync(currentFolder)
     .filter(file => path.extname(file).toLowerCase() === '.mp3')
     .map(file => {
       const filepath = path.join(currentFolder, file);
       const tags = NodeID3.read(filepath);
+      const fileGenres = tags.genre ? tags.genre.split(',').map(g => g.trim()) : ['Unknown'];
+      fileGenres.forEach(genre => genres.add(genre));
       return {
         filename: file,
         path: `/music/${encodeURIComponent(file)}`,
         rating: getRating(filepath),
-        genre: tags.genre || 'Unknown',
+        genres: fileGenres,
       };
     });
-  log(`Loaded ${playlist.length} tracks`);
-  return playlist;
+  log(`Loaded ${playlist.length} tracks with ${genres.size} unique genres`);
+  return { playlist, genres: Array.from(genres).sort() };
 }
 
 function getRating(filepath) {
-  // log(`Getting rating for file: ${filepath}`);
   const tags = NodeID3.read(filepath);
   if (tags.popularimeter && tags.popularimeter.rating !== undefined) {
     const rating = Math.floor(tags.popularimeter.rating / 51);
-    // log(`Rating found: ${rating}`);
     return rating;
   }
   process.stdout.write('.');
@@ -125,19 +126,18 @@ wss.on('connection', (ws, req) => {
 
   ws.on('message', (message) => {
     const data = JSON.parse(message);
-    // log(`Received WebSocket message: ${data.action}`);
     let response;
 
     switch (data.action) {
       case 'loadFolder':
-        const loadedPlaylist = loadPlaylist(data.folder);
+        const { playlist: loadedPlaylist, genres: loadedGenres } = loadPlaylist(data.folder);
         // Set up the /music route dynamically
         if (musicRoute) {
           app._router.stack.pop();
         }
         musicRoute = express.static(currentFolder);
         app.use('/music', musicRoute);
-        response = { action: 'playlistLoaded', playlist: loadedPlaylist };
+        response = { action: 'playlistLoaded', playlist: loadedPlaylist, genres: loadedGenres };
         break;
       case 'rate':
         if (currentTrack) {

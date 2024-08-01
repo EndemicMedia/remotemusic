@@ -2,7 +2,8 @@ let ws;
 let playlist = [];
 let currentTrack = null;
 let audioPlayer = new Audio();
-let currentFilter = 'all';
+let currentRatingFilter = 'all';
+let currentGenreFilters = [];
 
 // Ensure all functions are defined in the global scope
 window.loadFolder = function() {
@@ -56,21 +57,34 @@ window.skip = function(seconds) {
 }
 
 window.filterPlaylist = function() {
-    currentFilter = document.getElementById('ratingFilter').value;
-    console.log('Filtering playlist by:', currentFilter);
-    applyFilter();
+    currentRatingFilter = document.getElementById('ratingFilter').value;
+    console.log('Filtering playlist by rating:', currentRatingFilter);
+    applyFilters();
 }
 
-function applyFilter() {
-    let filteredPlaylist;
-    if (currentFilter === 'all') {
-        filteredPlaylist = playlist;
-    } else if (currentFilter === 'unrated') {
-        filteredPlaylist = playlist.filter(track => track.rating === 'Unrated');
-    } else {
-        const ratingValue = parseInt(currentFilter);
-        filteredPlaylist = playlist.filter(track => track.rating === ratingValue);
+function applyFilters() {
+    let filteredPlaylist = playlist;
+
+    // Apply rating filter
+    if (currentRatingFilter !== 'all') {
+        if (currentRatingFilter === 'unrated') {
+            filteredPlaylist = filteredPlaylist.filter(track => track.rating === 'Unrated');
+        } else {
+            const ratingValue = parseInt(currentRatingFilter);
+            filteredPlaylist = filteredPlaylist.filter(track => track.rating === ratingValue);
+        }
     }
+
+    // Apply genre filter
+    if (currentGenreFilters.length > 0) {
+        filteredPlaylist = filteredPlaylist.filter(track => {
+            const genreMatch = track.genres.some(genre => currentGenreFilters.includes(genre));
+            console.log('Genre match:', genreMatch);
+            return genreMatch;
+            }
+        );
+    }
+
     updatePlaylist(filteredPlaylist);
 }
 
@@ -109,14 +123,14 @@ function formatTime(seconds) {
 
 function updatePlaylist(playlistToShow) {
     console.log('Updating playlist:', playlistToShow);
-    const playlistElement = document.getElementById('playlist');
+    const playlistElement = document.getElementById('playlistItems');
     playlistElement.innerHTML = '';
     playlistToShow.forEach((track, index) => {
         const li = document.createElement('li');
         li.className = 'flex justify-between items-center p-2 hover:bg-gray-700 cursor-pointer';
         li.innerHTML = `
             <span class="w-1/3">${track.filename}</span>
-            <span class="w-1/3 text-center" style="white-space: pre; overflow: hidden;">${track.genre}</span>
+            <span class="w-1/3 text-center" style="white-space: pre; overflow: hidden;">${track.genres.join(', ')}</span>
             <span class="w-1/6 text-center text-green-500">${track.rating}</span>
         `;
         li.onclick = () => play(playlist.indexOf(track));
@@ -134,11 +148,11 @@ function showToast(message) {
     }, 3000);
 }
 
-function playNextTrack(currentIndex) {
+function playNextTrack() {
     const filteredPlaylist = getFilteredPlaylist();
-    const currentFilteredIndex = filteredPlaylist.findIndex(track => track === playlist[currentIndex]);
-    if (currentFilteredIndex < filteredPlaylist.length - 1) {
-        play(playlist.indexOf(filteredPlaylist[currentFilteredIndex + 1]));
+    const currentIndex = filteredPlaylist.findIndex(track => track === currentTrack);
+    if (currentIndex < filteredPlaylist.length - 1) {
+        play(playlist.indexOf(filteredPlaylist[currentIndex + 1]));
     } else {
         currentTrack = null;
         updateNowPlaying();
@@ -146,33 +160,47 @@ function playNextTrack(currentIndex) {
 }
 
 function getFilteredPlaylist() {
-    if (currentFilter === 'all') {
-        return playlist;
-    } else if (currentFilter === 'unrated') {
-        return playlist.filter(track => track.rating === 'Unrated');
-    } else {
-        const ratingValue = parseInt(currentFilter);
-        return playlist.filter(track => track.rating === ratingValue);
+    let filteredPlaylist = playlist;
+    if (currentRatingFilter !== 'all') {
+        if (currentRatingFilter === 'unrated') {
+            filteredPlaylist = filteredPlaylist.filter(track => track.rating === 'Unrated');
+        } else {
+            const ratingValue = parseInt(currentRatingFilter);
+            filteredPlaylist = filteredPlaylist.filter(track => track.rating === ratingValue);
+        }
     }
+    if (currentGenreFilters.length > 0) {
+        filteredPlaylist = filteredPlaylist.filter(track => 
+            track.genres.some(genre => currentGenreFilters.includes(genre))
+        );
+    }
+    return filteredPlaylist;
 }
 
 function sendRemoteUpdate(action, data) {
     ws.send(JSON.stringify({ action, ...data }));
 }
 
+function initializeGenreFilter(genres) {
+    const genreFilter = $('#genreFilter');
+    genreFilter.empty();
+    genres.forEach(genre => {
+        genreFilter.append(new Option(genre, genre));
+    });
+    genreFilter.select2({
+        placeholder: 'Select genres',
+        allowClear: true,
+        theme: 'classic'
+    });
+    genreFilter.on('change', function() {
+        currentGenreFilters = $(this).val() || [];
+        applyFilters();
+    });
+}
+
 // Setup audio player event listeners
 audioPlayer.addEventListener('timeupdate', updateProgressBar);
-audioPlayer.addEventListener('ended', () => {
-    const filteredPlaylist = getFilteredPlaylist();
-    const currentFilteredIndex = filteredPlaylist.findIndex(track => track === currentTrack);
-    if (currentFilteredIndex < filteredPlaylist.length - 1) {
-        play(playlist.indexOf(filteredPlaylist[currentFilteredIndex + 1]));
-    } else {
-        currentTrack = null;
-        updateNowPlaying();
-        updateProgressBar();
-    }
-});
+audioPlayer.addEventListener('ended', playNextTrack);
 
 // Key shortcuts
 document.addEventListener('keydown', (event) => {
@@ -197,15 +225,13 @@ document.addEventListener('keydown', (event) => {
             break;
         case 'ArrowUp':
             // Play previous track
-            const filteredPlaylist = getFilteredPlaylist();
-            const currentFilteredIndex = filteredPlaylist.findIndex(track => track === currentTrack);
-            if (currentFilteredIndex > 0) play(playlist.indexOf(filteredPlaylist[currentFilteredIndex - 1]));
+            const prevFilteredPlaylist = getFilteredPlaylist();
+            const prevCurrentIndex = prevFilteredPlaylist.findIndex(track => track === currentTrack);
+            if (prevCurrentIndex > 0) play(playlist.indexOf(prevFilteredPlaylist[prevCurrentIndex - 1]));
             break;
         case 'ArrowDown':
             // Play next track
-            const filteredPlaylist2 = getFilteredPlaylist();
-            const currentFilteredIdx = filteredPlaylist2.findIndex(track => track === currentTrack);
-            if (currentFilteredIdx < filteredPlaylist2.length - 1) play(playlist.indexOf(filteredPlaylist2[currentFilteredIdx + 1]));
+            playNextTrack();
             break;
         case ' ':
             audioPlayer.paused ? resume() : pause();
@@ -226,13 +252,14 @@ function connectWebSocket() {
                 break;
             case 'playlistLoaded':
                 playlist = data.playlist;
-                applyFilter();
+                initializeGenreFilter(data.genres);
+                applyFilters();
                 break;
             case 'playlistUpdated':
                 playlist = data.playlist;
-                applyFilter();
+                applyFilters();
                 showToast(`Rating updated to: ${data.updatedRating}`);
-                playNextTrack(data.updatedTrackIndex);
+                playNextTrack();
                 break;
             case 'play':
                 if (currentTrack) audioPlayer.play();
@@ -248,13 +275,11 @@ function connectWebSocket() {
                 break;
             case 'previousTrack':
                 const prevFilteredPlaylist = getFilteredPlaylist();
-                const prevCurrentFilteredIndex = prevFilteredPlaylist.findIndex(track => track === currentTrack);
-                if (prevCurrentFilteredIndex > 0) play(playlist.indexOf(prevFilteredPlaylist[prevCurrentFilteredIndex - 1]));
+                const prevCurrentIndex = prevFilteredPlaylist.findIndex(track => track === currentTrack);
+                if (prevCurrentIndex > 0) play(playlist.indexOf(prevFilteredPlaylist[prevCurrentIndex - 1]));
                 break;
             case 'nextTrack':
-                const nextFilteredPlaylist = getFilteredPlaylist();
-                const nextCurrentFilteredIndex = nextFilteredPlaylist.findIndex(track => track === currentTrack);
-                if (nextCurrentFilteredIndex < nextFilteredPlaylist.length - 1) play(playlist.indexOf(nextFilteredPlaylist[nextCurrentFilteredIndex + 1]));
+                playNextTrack();
                 break;
         }
     };
