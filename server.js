@@ -14,13 +14,37 @@ let desktopClient = null;
 let remoteClients = new Set();
 let currentTrack = null;
 
+const app = express();
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
+
 function log(message) {
   console.log(`[${new Date().toISOString()}] ${message}`);
 }
 
-function saveConfig(folder) {
-  log(`Saving config with folder: ${folder}`);
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify({ lastFolder: folder }));
+function saveConfig(obj) {
+  log(`Saving config with folder: ${obj}`);
+  // fs.writeFileSync(CONFIG_FILE, JSON.stringify(obj));
+  log(`Saving config with folder: ${obj}`);
+  
+  let existingData = {};
+  
+  // Check if the file exists
+  if (fs.existsSync(CONFIG_FILE)) {
+    // Read existing data
+    const fileContent = fs.readFileSync(CONFIG_FILE, 'utf8');
+    try {
+      existingData = JSON.parse(fileContent);
+    } catch (error) {
+      console.error('Error parsing existing config file:', error);
+    }
+  }
+  
+  // Merge existing data with new object
+  const updatedData = { ...existingData, ...obj };
+  
+  // Write updated data to file
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(updatedData, null, 2));
 }
 
 function loadConfig() {
@@ -28,7 +52,7 @@ function loadConfig() {
   try {
     const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
     log(`Loaded last folder: ${config.lastFolder}`);
-    return config.lastFolder;
+    return config;
   } catch (error) {
     log(`Error loading config: ${error.message}`);
     return null;
@@ -38,7 +62,7 @@ function loadConfig() {
 function loadPlaylist(folder) {
   log(`Loading playlist from folder: ${folder}`);
   currentFolder = folder;
-  saveConfig(folder);
+  saveConfig({lastFolder: folder});
   genres.clear();
   playlist = fs.readdirSync(currentFolder)
     .filter(file => path.extname(file).toLowerCase() === '.mp3')
@@ -98,10 +122,6 @@ function rateTrack(filename, rating) {
     return null;
   }
 }
-
-const app = express();
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
 
 app.use(express.static('public'));
 app.get('/remote', (req, res) => {
@@ -174,6 +194,15 @@ wss.on('connection', (ws, req) => {
         // Forward these updates to all remote clients
         broadcastToRemotes(data);
         break;
+      case 'copyFiles':
+        try {
+          const copiedCount = copyFiles(data.destinationPath, data.files, ws);
+          response = { action: 'copyFilesComplete', copiedCount: copiedCount };
+        } catch (error) {
+          log(`Error during file copy: ${error.message}`);
+          response = { action: 'copyFilesError', error: error.message };
+        }
+        break;
     }
 
     if (response) {
@@ -191,11 +220,40 @@ wss.on('connection', (ws, req) => {
     }
   });
 
-  const lastFolder = loadConfig();
-  if (lastFolder) {
-    ws.send(JSON.stringify({ action: 'lastFolder', folder: lastFolder }));
-  }
+const {lastFolder, destinationPath} = loadConfig();
+  if (lastFolder) ws.send(JSON.stringify({ action: 'lastFolder', folder: lastFolder }));
+  if (destinationPath) ws.send(JSON.stringify({ action: 'destinationPath', folder: destinationPath }));  
 });
+
+
+// New function to copy files
+function copyFiles(destinationPath, files, ws) {
+  log(`Copying ${files.length} files to ${destinationPath}`);
+  saveConfig({destinationPath});
+  let copiedCount = 0;
+  
+  // Ensure destination directory exists
+  if (!fs.existsSync(destinationPath)) {
+    fs.mkdirSync(destinationPath, { recursive: true });
+  }
+
+  files.forEach((file, index) => {
+    const sourcePath = path.join(currentFolder, file);
+    const destPath = path.join(destinationPath, file);
+    try {
+      fs.copyFileSync(sourcePath, destPath);
+      copiedCount++;
+      // Send progress update
+      const progress = Math.round((index + 1) / files.length * 100);
+      ws.send(JSON.stringify({ action: 'copyProgress', progress: progress }));
+    } catch (error) {
+      log(`Error copying file ${file}: ${error.message}`);
+    }
+  });
+
+  log(`Copied ${copiedCount} out of ${files.length} files`);
+  return copiedCount;
+}
 
 function broadcastToAll(data) {
   const message = JSON.stringify(data);

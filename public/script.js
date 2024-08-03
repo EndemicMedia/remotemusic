@@ -81,8 +81,7 @@ function applyFilters() {
             const genreMatch = track.genres.some(genre => currentGenreFilters.includes(genre));
             console.log('Genre match:', genreMatch);
             return genreMatch;
-            }
-        );
+        });
     }
 
     updatePlaylist(filteredPlaylist);
@@ -198,6 +197,52 @@ function initializeGenreFilter(genres) {
     });
 }
 
+// Add this new function
+function updateCopyStatus(isVisible) {
+    const copyStatus = document.getElementById('copyStatus');
+    if (isVisible) {
+        copyStatus.classList.remove('hidden');
+        document.getElementById("copyBtn").disabled = true;
+    } else {
+        copyStatus.classList.add('hidden');
+        document.getElementById("copyBtn").disabled = false;
+    }
+}
+
+
+// New function for copying files
+window.copyFiles = function() {
+    const destinationPath = document.getElementById('copyPath').value;
+    const minRating = parseInt(document.getElementById('ratingSlider').value);
+    showToast('Prepare to copy files. This may take a while.');
+    if (!destinationPath) {
+        showToast('Please enter a destination folder path.');
+        return;
+    }
+
+    const filesToCopy = playlist.filter(track => {
+        const trackRating = track.rating === 'Unrated' ? 0 : parseInt(track.rating);
+        return trackRating >= minRating;
+    });
+
+    if (filesToCopy.length === 0) {
+        showToast('No files match the selected rating criteria.');
+        return;
+    }
+
+    updateCopyStatus(true); // Show the copy status
+    ws.send(JSON.stringify({
+        action: 'copyFiles',
+        destinationPath: destinationPath,
+        files: filesToCopy.map(track => track.filename)
+    }));
+}
+
+function updateCopyProgress(progress) {
+    const copyStatus = document.getElementById('copyStatus');
+    copyStatus.textContent = `Copying files... ${progress}%`;
+}
+
 // Setup audio player event listeners
 audioPlayer.addEventListener('timeupdate', updateProgressBar);
 audioPlayer.addEventListener('ended', playNextTrack);
@@ -250,6 +295,9 @@ function connectWebSocket() {
                 document.getElementById('folderPath').value = data.folder;
                 loadFolder();
                 break;
+            case 'destinationPath':
+                document.getElementById('copyPath').value = data.folder;
+                break;
             case 'playlistLoaded':
                 playlist = data.playlist;
                 initializeGenreFilter(data.genres);
@@ -281,6 +329,17 @@ function connectWebSocket() {
             case 'nextTrack':
                 playNextTrack();
                 break;
+            case 'copyFilesComplete':
+                updateCopyStatus(false); // Hide the copy status
+                showToast(`Successfully copied ${data.copiedCount} files.`);
+                break;
+            case 'copyFilesError':
+                updateCopyStatus(false); // Hide the copy status
+                showToast(`Error copying files: ${data.error}`);
+                break;
+            case 'copyProgress':
+                updateCopyProgress(data.progress);
+                break;
         }
     };
 
@@ -289,5 +348,15 @@ function connectWebSocket() {
         setTimeout(connectWebSocket, 1000);
     };
 }
+
+// Initialize rating slider
+document.addEventListener('DOMContentLoaded', function() {
+    const slider = document.getElementById('ratingSlider');
+    const value = document.getElementById('ratingValue');
+    value.textContent = slider.value;
+    slider.oninput = function() {
+        value.textContent = this.value;
+    }
+});
 
 connectWebSocket();
