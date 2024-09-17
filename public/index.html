@@ -69,12 +69,17 @@
                 <span id="currentTime">0:00</span>
                 <span id="totalTime">0:00</span>
             </div>
-            <div class="mb-4 flex space-x-2">
+            <div class="mb-4 flex space-x-2 items-center">
                 <button onclick="skip(-30)" class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded">-30s</button>
                 <button onclick="pause()" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded">Pause</button>
                 <button onclick="resume()" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded">Play</button>
                 <button onclick="stop()" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded">Stop</button>
                 <button onclick="skip(30)" class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded">+30s</button>
+                <div class="flex items-center ml-4">
+                    <i class="fas fa-volume-up mr-2"></i>
+                    <input type="range" id="volumeSlider" min="0" max="100" value="100" class="w-24">
+                    <span id="volumeLevel" class="ml-2">100%</span>
+                </div>
             </div>
             <div class="flex space-x-2 mt-2">
                 <button onclick="rate(0)" class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded">0</button>
@@ -86,9 +91,6 @@
                 <button onclick="rate('Unrated')" class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded">Unrate</button>
             </div>
         </div>
-
-        
-
 
         <div class="mb-4">
             <h2 id="playlist" class="text-2xl font-bold mb-2">Playlist</h2>

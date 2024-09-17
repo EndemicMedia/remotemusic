@@ -77,6 +77,9 @@ function loadPlaylist(folder) {
         rating: getRating(filepath),
         genres: fileGenres,
       };
+    })
+    .sort(function (a, b) {
+        return a.filename.toLowerCase().localeCompare(b.filename.toLowerCase());
     });
   log(`Loaded ${playlist.length} tracks with ${genres.size} unique genres`);
   return { playlist, genres: Array.from(genres).sort() };

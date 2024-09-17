@@ -129,11 +129,21 @@ function updatePlaylist(playlistToShow) {
         li.className = 'flex justify-between items-center p-2 hover:bg-gray-700 cursor-pointer';
         li.innerHTML = `
             <span class="w-1/3">${track.filename}</span>
-            <span class="w-1/3 text-center" style="white-space: pre; overflow: hidden;">${track.genres.join(', ')}</span>
+            <span class="w-1/3 text-center genre-list" style="white-space: pre; overflow: hidden;">${track.genres.join(', ')}</span>
             <span class="w-1/6 text-center text-green-500">${track.rating}</span>
         `;
         li.onclick = () => play(playlist.indexOf(track));
         playlistElement.appendChild(li);
+    });
+
+    // Add click event listener to genre list for copying
+    document.querySelectorAll('.genre-list').forEach(element => {
+        element.addEventListener('click', function(event) {
+            event.stopPropagation();  // Prevent triggering play() when clicking on genres
+            navigator.clipboard.writeText(this.textContent)
+                .then(() => showToast('Genres copied to clipboard!'))
+                .catch(err => console.error('Failed to copy genres: ', err));
+        });
     });
 }
 
@@ -247,6 +257,16 @@ function updateCopyProgress(progress) {
 audioPlayer.addEventListener('timeupdate', updateProgressBar);
 audioPlayer.addEventListener('ended', playNextTrack);
 
+// Volume control
+const volumeSlider = document.getElementById('volumeSlider');
+const volumeLevel = document.getElementById('volumeLevel');
+
+volumeSlider.addEventListener('input', function() {
+    const volume = this.value / 100;
+    audioPlayer.volume = volume;
+    volumeLevel.textContent = `${this.value}%`;
+});
+
 // Key shortcuts
 document.addEventListener('keydown', (event) => {
     console.log('Key pressed:', event.key);
@@ -277,6 +297,16 @@ document.addEventListener('keydown', (event) => {
         case 'ArrowDown':
             // Play next track
             playNextTrack();
+            break;
+        case '=':
+            // Increase volume
+            volumeSlider.value = Math.min(100, parseInt(volumeSlider.value) + 10);
+            volumeSlider.dispatchEvent(new Event('input'));
+            break;
+        case '-':
+            // Decrease volume
+            volumeSlider.value = Math.max(0, parseInt(volumeSlider.value) - 10);
+            volumeSlider.dispatchEvent(new Event('input'));
             break;
         case ' ':
             audioPlayer.paused ? resume() : pause();
