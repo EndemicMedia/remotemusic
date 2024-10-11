@@ -129,8 +129,8 @@ function updatePlaylist(playlistToShow) {
         li.className = 'flex justify-between items-center p-2 hover:bg-gray-700 cursor-pointer';
         li.innerHTML = `
             <span class="w-1/3">${track.filename}</span>
-            <span class="w-1/3 text-center genre-list" style="white-space: pre; overflow: hidden;">${track.genres.join(', ')}</span>
-            <span class="w-1/6 text-center text-green-500">${track.rating}</span>
+            <span class="w-1/2 genre-list text-sm" style="white-space: pre; overflow: hidden;">${track.genres.join(', ')}</span>
+            <span class="w-1/12 text-center text-green-500">${track.rating}</span>
         `;
         li.onclick = () => play(playlist.indexOf(track));
         playlistElement.appendChild(li);
