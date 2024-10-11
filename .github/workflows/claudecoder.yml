@@ -13,6 +13,7 @@ jobs:
     permissions: write-all
     runs-on: ubuntu-latest
     steps:
+    - uses: actions/checkout@v3
     - run: ls -R /home/runner/work/remotemusic/
     # - name: ClaudeCoderAction
     #   uses: EndemicMedia/claudecoder@main
