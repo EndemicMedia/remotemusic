@@ -7,7 +7,7 @@ A Node.js-based MP3 player with ID3 tag support, a web GUI, and remote control f
 - Web-based interface for easy access
 - Remote control functionality for smartphones on the same network
 - ID3 tag support for displaying and editing track information
-- Playlist management with filtering by rating
+- Playlist management with filtering by rating and creation date sorting
 - Keyboard shortcuts for quick control
 - Real-time updates across all connected devices
 
