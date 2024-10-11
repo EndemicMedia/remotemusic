@@ -14,10 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - run: ls -R /home/runner/work/remotemusic/
-    # - name: ClaudeCoderAction
-    #   uses: EndemicMedia/claudecoder@main
-    #   with:
-    #     aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-    #     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-    #     github-token: ${{ secrets.GITHUB_TOKEN }}
+    - run: ls -R /home/runner/work/remotemusic/remotemusic
+    - name: ClaudeCoderAction
+      uses: EndemicMedia/claudecoder@main
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
