@@ -6,6 +6,7 @@ const express = require('express');
 const NodeID3 = require('node-id3');
 
 const CONFIG_FILE = path.join(__dirname, 'config.json');
+const LIBRARY_FILE = path.join(__dirname, 'library.json');
 
 let currentFolder = '';
 let playlist = [];
@@ -13,6 +14,7 @@ let genres = new Set();
 let desktopClient = null;
 let remoteClients = new Set();
 let currentTrack = null;
+let isReloadingLibrary = false;
 
 const app = express();
 const server = http.createServer(app);
@@ -23,9 +25,7 @@ function log(message) {
 }
 
 function saveConfig(obj) {
-  log(`Saving config with folder: ${obj}`);
-  // fs.writeFileSync(CONFIG_FILE, JSON.stringify(obj));
-  log(`Saving config with folder: ${obj}`);
+  log(`Saving config with folder: ${obj.lastFolder}`);
   
   let existingData = {};
   
@@ -59,30 +59,161 @@ function loadConfig() {
   }
 }
 
-function loadPlaylist(folder) {
+function sanitizeFilename(filename) {
+  return filename
+  try {
+    // Normalize Unicode characters
+    const normalized = filename.normalize('NFD')
+      // Remove combining diacritical marks
+      .replace(/[\u0300-\u036f]/g, '')
+      // Replace remaining non-ASCII characters with underscores
+      // .replace(/[^\x00-\x7F]/g, '_')
+      // Replace multiple consecutive underscores with a single one
+      // .replace(/_+/g, '_')
+      // Remove leading/trailing underscores
+      // .trim();
+    
+    return normalized;
+  } catch (error) {
+    console.error(`Error sanitizing filename: ${filename}`, error);
+    return null;
+  }
+}
+
+function saveLibrary(libraryData) {
+  log('Saving library to file');
+  fs.writeFileSync(LIBRARY_FILE, JSON.stringify(libraryData, null, 2));
+  log('Library saved successfully');
+}
+
+function loadLibrary() {
+  log('Loading library from file');
+  try {
+    const libraryData = JSON.parse(fs.readFileSync(LIBRARY_FILE, 'utf8'));
+    log(`Loaded ${libraryData.playlist.length} tracks from library file`);
+    return libraryData;
+  } catch (error) {
+    log(`Error loading library: ${error.message}`);
+    return null;
+  }
+}
+
+function loadPlaylist(folder, useCache = true) {
   log(`Loading playlist from folder: ${folder}`);
   currentFolder = folder;
   saveConfig({lastFolder: folder});
+  
+  if (useCache) {
+    const cachedLibrary = loadLibrary();
+    if (cachedLibrary && cachedLibrary.folder === folder && cachedLibrary.playlist.length > 0) {
+      log('Using cached library data');
+      playlist = cachedLibrary.playlist;
+      genres = new Set(cachedLibrary.genres);
+      log(`Loaded ${playlist.length} tracks from cache with ${genres.size} unique genres`);
+      return { playlist, genres: Array.from(genres).sort() };
+    }
+  }
+  
+  log('Cache is empty or invalid. Loading playlist from disk...');
+  return loadPlaylistFromDisk(folder);
+}
+
+function loadPlaylistFromDisk(folder) {
+  log(`Loading playlist from disk: ${folder}`);
   genres.clear();
-  playlist = fs.readdirSync(currentFolder)
+  playlist = fs.readdirSync(folder)
     .filter(file => path.extname(file).toLowerCase() === '.mp3')
     .map(file => {
-      const filepath = path.join(currentFolder, file);
-      const tags = NodeID3.read(filepath);
-      const fileGenres = tags.genre ? tags.genre.split(',').map(g => g.trim()) : ['Unknown'];
-      fileGenres.forEach(genre => genres.add(genre));
-      return {
-        filename: file,
-        path: `/music/${encodeURIComponent(file)}`,
-        rating: getRating(filepath),
-        genres: fileGenres,
-      };
+      try {
+        const sanitizedFile = sanitizeFilename(file);
+        if (!sanitizedFile) {
+          console.error(`Could not sanitize filename: ${file}`);
+          return null;
+        }
+
+        const originalPath = path.join(folder, file);
+        
+        // Check if file exists
+        if (!fs.existsSync(originalPath)) {
+          console.error(`File not found: ${originalPath}`);
+          return null;
+        }
+
+        // Read ID3 tags with error handling
+        let tags;
+        try {
+          tags = NodeID3.read(originalPath);
+        } catch (error) {
+          console.error(`Error reading ID3 tags for ${file}:`, error);
+          tags = {};
+        }
+
+        // Process genres safely
+        const fileGenres = tags.genre ? 
+          tags.genre.split(',')
+            .map(g => g.trim())
+            .filter(g => g.length > 0) : 
+          ['Unknown'];
+
+        // Add genres to the set
+        fileGenres.forEach(genre => {
+          try {
+            genres.add(genre);
+          } catch (error) {
+            console.error(`Error adding genre: ${genre}`, error);
+          }
+        });
+
+        // Return the processed file information
+        return {
+          filename: sanitizedFile,
+          originalName: file,
+          path: `/music/${encodeURIComponent(sanitizedFile)}`,
+          rating: getRating(originalPath),
+          genres: fileGenres,
+        };
+      } catch (error) {
+        console.error(`Error processing file: ${file}`, error);
+        return null;
+      }
     })
-    .sort(function (a, b) {
-        return a.filename.toLowerCase().localeCompare(b.filename.toLowerCase());
-    });
+    .filter(item => item !== null)
+    .sort((a, b) => a.filename.toLowerCase().localeCompare(b.filename.toLowerCase()));
+
   log(`Loaded ${playlist.length} tracks with ${genres.size} unique genres`);
+  
+  // Save the library
+  saveLibrary({ folder, playlist, genres: Array.from(genres) });
+  
   return { playlist, genres: Array.from(genres).sort() };
+}
+
+function reloadLibraryInBackground(folder, ws) {
+  log('Starting background library reload');
+  isReloadingLibrary = true;
+  broadcastToAll({ action: 'reloadingLibrary', status: 'started' });
+  
+  const startTime = Date.now();
+  const { playlist: newPlaylist, genres: newGenres } = loadPlaylistFromDisk(folder);
+
+  const endTime = Date.now();
+  isReloadingLibrary = false;
+  log(`Background library reload complete. Time taken: ${(endTime - startTime) / 1000} seconds`);
+  
+  // Update the current playlist and genres
+  playlist = newPlaylist;
+  genres = new Set(newGenres);
+  
+  // Save the updated library
+  saveLibrary({ folder, playlist, genres: Array.from(genres) });
+
+  // Notify all clients about the updated library
+  broadcastToAll({ 
+    action: 'libraryUpdated', 
+    playlist: playlist, 
+    genres: Array.from(genres).sort(),
+    reloadTime: (endTime - startTime) / 1000
+  });
 }
 
 function getRating(filepath) {
@@ -119,6 +250,9 @@ function rateTrack(filename, rating) {
     const updatedRating = updatedTags.popularimeter ? Math.floor(updatedTags.popularimeter.rating / 51) : 'Unrated';
     log(`Updated rating confirmed: ${updatedRating}`);
     
+    // Update the library file
+    saveLibrary({ folder: currentFolder, playlist, genres: Array.from(genres) });
+    
     return { updatedPlaylist: playlist, updatedRating: updatedRating, updatedTrackIndex: trackIndex };
   } else {
     log('Failed to save rating');
@@ -152,6 +286,10 @@ wss.on('connection', (ws, req) => {
     let response;
 
     switch (data.action) {
+      case 'reloadLibrary':
+        reloadLibraryInBackground(currentFolder, ws);
+        response = { action: 'reloadLibraryStarted' };
+        break;
       case 'loadFolder':
         const { playlist: loadedPlaylist, genres: loadedGenres } = loadPlaylist(data.folder);
         // Set up the /music route dynamically
@@ -160,7 +298,12 @@ wss.on('connection', (ws, req) => {
         }
         musicRoute = express.static(currentFolder);
         app.use('/music', musicRoute);
-        response = { action: 'playlistLoaded', playlist: loadedPlaylist, genres: loadedGenres };
+        response = { 
+          action: 'playlistLoaded', 
+          playlist: loadedPlaylist, 
+          genres: loadedGenres,
+          isReloadingLibrary: isReloadingLibrary
+        };
         break;
       case 'rate':
         if (currentTrack) {
@@ -172,7 +315,7 @@ wss.on('connection', (ws, req) => {
             updatedTrackIndex: result ? result.updatedTrackIndex : -1
           };
           // Broadcast the updated playlist to all clients
-          broadcastToAll(response);
+          // broadcastToAll(response);
         } else {
           log('No track playing to rate');
         }
@@ -223,7 +366,7 @@ wss.on('connection', (ws, req) => {
     }
   });
 
-const {lastFolder, destinationPath} = loadConfig();
+  const {lastFolder, destinationPath} = loadConfig();
   if (lastFolder) ws.send(JSON.stringify({ action: 'lastFolder', folder: lastFolder }));
   if (destinationPath) ws.send(JSON.stringify({ action: 'destinationPath', folder: destinationPath }));  
 });

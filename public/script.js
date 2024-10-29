@@ -1,9 +1,12 @@
 let ws;
 let playlist = [];
 let currentTrack = null;
+let nextTrack = null; // Stores the next track to play
 let audioPlayer = new Audio();
 let currentRatingFilter = 'all';
 let currentGenreFilters = [];
+let currentColorFilter = 'all';
+let shouldPlayNextAfterRating = false; // New flag to indicate if we should play the next track after rating
 
 // Ensure all functions are defined in the global scope
 window.loadFolder = function() {
@@ -20,6 +23,21 @@ window.play = function(index) {
     updateNowPlaying();
     updateProgressBar();
     sendRemoteUpdate('updateNowPlaying', { track: currentTrack.filename });
+    
+    // Set the next track
+    setNextTrack(index);
+}
+
+// Helper function to set the next track
+function setNextTrack(currentIndex) {
+    const filteredPlaylist = getFilteredPlaylist();
+    const currentFilteredIndex = filteredPlaylist.findIndex(track => track === playlist[currentIndex]);
+    if (currentFilteredIndex > -1 && currentFilteredIndex < filteredPlaylist.length - 1) {
+        nextTrack = filteredPlaylist[currentFilteredIndex + 1];
+    } else {
+        // nextTrack = filteredPlaylist[0]; // Loop back to the beginning of filtered playlist
+    }
+    console.log('Next track set to:', nextTrack ? nextTrack.filename : 'None');
 }
 
 window.stop = function() {
@@ -46,6 +64,13 @@ window.rate = function(rating) {
     console.log('Rating track:', rating);
     if (currentTrack) {
         ws.send(JSON.stringify({ action: 'rate', filename: currentTrack.filename, rating: rating }));
+        // Set flag to play next track if rating is 2 or below
+        shouldPlayNextAfterRating = rating <= 2;
+        // Check if the current track will be filtered out
+        if (currentRatingFilter !== 'all' && currentRatingFilter !== rating.toString()) {
+            // Update nextTrack as the current one will be filtered out
+            setNextTrack(playlist.indexOf(currentTrack));
+        }
     } else {
         console.log('No track playing to rate');
     }
@@ -58,7 +83,8 @@ window.skip = function(seconds) {
 
 window.filterPlaylist = function() {
     currentRatingFilter = document.getElementById('ratingFilter').value;
-    console.log('Filtering playlist by rating:', currentRatingFilter);
+    currentColorFilter = document.getElementById('colorFilter').value;
+    console.log('Filtering playlist by rating:', currentRatingFilter, 'and color:', currentColorFilter);
     applyFilters();
 }
 
@@ -82,6 +108,22 @@ function applyFilters() {
             console.log('Genre match:', genreMatch);
             return genreMatch;
         });
+    }
+
+    // Apply color filter
+    if (currentColorFilter !== 'all') {
+        const artistStats = calculateArtistRatings(playlist);
+        filteredPlaylist = filteredPlaylist.filter(track => {
+            const artist = track.filename.split(' - ')[0];
+            const artistScore = artistStats[artist].score;
+            return getColorCategory(artistScore) === currentColorFilter;
+        });
+    }
+
+    // Preserve nextTrack if it's still in the filtered playlist
+    if (nextTrack && !filteredPlaylist.includes(nextTrack)) {
+        const currentIndex = playlist.indexOf(currentTrack);
+        setNextTrack(currentIndex);
     }
 
     updatePlaylist(filteredPlaylist);
@@ -120,13 +162,90 @@ function formatTime(seconds) {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
 }
 
+// Add this function to calculate artist ratings
+function calculateArtistRatings(playlist) {
+    const artistStats = {};
+    
+    playlist.forEach(track => {
+        // Extract artist name from filename
+        const artist = track.filename.split(' - ')[0];
+        if (!artistStats[artist]) {
+            artistStats[artist] = {
+                totalRating: 0,
+                songCount: 0,
+                ratedSongCount: 0
+            };
+        }
+        
+        // Add to rating total if the track is rated
+        if (track.rating !== 'Unrated') {
+            artistStats[artist].totalRating += parseInt(track.rating);
+            artistStats[artist].ratedSongCount++;
+        }
+        artistStats[artist].songCount++;
+    });
+    
+    // Calculate average ratings and scores
+    Object.keys(artistStats).forEach(artist => {
+        const stats = artistStats[artist];
+        if (stats.ratedSongCount > 0) {
+            stats.averageRating = stats.totalRating / stats.ratedSongCount;
+            // Score ranges from -100 to 100
+            stats.score = ((stats.averageRating - 2.5) / 2.5) * 100;
+        } else {
+            stats.averageRating = 0;
+            stats.score = 0;
+        }
+    });
+    
+    return artistStats;
+}
+
+// Add this function to get background color based on artist score
+function getArtistBackgroundColor(score) {
+    if (score === 0) return ''; // Default background for unrated artists
+    
+    let r, g, b, a;
+    if (score > 0) {
+        // Positive scores: green tint
+        const intensity = Math.min(score, 100) / 100;
+        r = 0;
+        g = Math.round(intensity * 128);
+        b = 0;
+        a = 0.2 + (intensity * 0.3); // Varying opacity
+    } else {
+        // Negative scores: red tint
+        const intensity = Math.min(Math.abs(score), 100) / 100;
+        r = Math.round(intensity * 128);
+        g = 0;
+        b = 0;
+        a = 0.2 + (intensity * 0.3); // Varying opacity
+    }
+    
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
+// New function to determine color category based on score
+function getColorCategory(score) {
+    if (score === 0) return 'neutral';
+    if (score < -60) return 'very negative';
+    if (score < -20) return 'negative';
+    if (score < 20) return 'neutral';
+    if (score < 60) return 'positive';
+    return 'very positive';
+}
+
 function updatePlaylist(playlistToShow) {
-    console.log('Updating playlist:', playlistToShow);
+    console.log('Updating playlist:', playlistToShow.length);
     const playlistElement = document.getElementById('playlistItems');
     playlistElement.innerHTML = '';
+    // Calculate artist ratings once
+    const artistStats = calculateArtistRatings(playlist);
     playlistToShow.forEach((track, index) => {
         const li = document.createElement('li');
         li.className = 'flex justify-between items-center p-2 hover:bg-gray-700 cursor-pointer';
+        const artist = track.filename.split(' - ')[0]
+        li.style.backgroundColor = getArtistBackgroundColor(artistStats[artist].score);
         li.innerHTML = `
             <span class="w-1/3">${track.filename}</span>
             <span class="w-1/2 genre-list text-sm" style="white-space: pre; overflow: hidden;">${track.genres.join(', ')}</span>
@@ -158,13 +277,20 @@ function showToast(message) {
 }
 
 function playNextTrack() {
-    const filteredPlaylist = getFilteredPlaylist();
-    const currentIndex = filteredPlaylist.findIndex(track => track === currentTrack);
-    if (currentIndex < filteredPlaylist.length - 1) {
-        play(playlist.indexOf(filteredPlaylist[currentIndex + 1]));
+    if (nextTrack) {
+        const nextIndex = playlist.indexOf(nextTrack);
+        play(nextIndex);
     } else {
-        currentTrack = null;
-        updateNowPlaying();
+        const filteredPlaylist = getFilteredPlaylist();
+        if (filteredPlaylist.length > 0) {
+            const currentIndex = filteredPlaylist.findIndex(track => track === currentTrack);
+            const nextIndex = (currentIndex + 1) % filteredPlaylist.length;
+            play(playlist.indexOf(filteredPlaylist[nextIndex]));
+        } else {
+            currentTrack = null;
+            nextTrack = null;
+            updateNowPlaying();
+        }
     }
 }
 
@@ -182,6 +308,14 @@ function getFilteredPlaylist() {
         filteredPlaylist = filteredPlaylist.filter(track => 
             track.genres.some(genre => currentGenreFilters.includes(genre))
         );
+    }
+    if (currentColorFilter !== 'all') {
+        const artistStats = calculateArtistRatings(playlist);
+        filteredPlaylist = filteredPlaylist.filter(track => {
+            const artist = track.filename.split(' - ')[0];
+            const artistScore = artistStats[artist].score;
+            return getColorCategory(artistScore) === currentColorFilter;
+        });
     }
     return filteredPlaylist;
 }
@@ -208,6 +342,22 @@ function initializeGenreFilter(genres) {
 }
 
 // Add this new function
+window.reloadLibrary = function() {
+    console.log('Reloading library');
+    ws.send(JSON.stringify({ action: 'reloadLibrary' }));
+    document.getElementById('reloadProgress').classList.remove('hidden');
+    document.getElementById('reloadLibraryBtn').disabled = true;
+}
+
+function updateReloadProgress(progress) {
+    const progressBar = document.getElementById('reloadProgressBar');
+    const progressText = document.getElementById('reloadProgressText');
+    if (progressBar && progressText) {
+        progressBar.style.width = `${progress}%`;
+        progressText.textContent = `${progress}%`;
+    }
+    console.log(`Library reload progress: ${progress}%`);
+}
 function updateCopyStatus(isVisible) {
     const copyStatus = document.getElementById('copyStatus');
     if (isVisible) {
@@ -328,16 +478,43 @@ function connectWebSocket() {
             case 'destinationPath':
                 document.getElementById('copyPath').value = data.folder;
                 break;
+            case 'reloadingLibrary':
+                showToast('Library reload started');
+                document.getElementById('reloadProgress').classList.remove('hidden');
+                break;
+            case 'reloadProgress':
+                updateReloadProgress(data.progress);
+                break;
+            case 'libraryUpdated':
+                document.getElementById('reloadProgress').classList.add('hidden');
+                document.getElementById('reloadLibraryBtn').disabled = false;
+                showToast(`Library reload complete. Time taken: ${data.reloadTime} seconds`);
+                playlist = data.playlist;
+                initializeGenreFilter(data.genres);
+                applyFilters();
+                break;
             case 'playlistLoaded':
                 playlist = data.playlist;
                 initializeGenreFilter(data.genres);
                 applyFilters();
                 break;
             case 'playlistUpdated':
+                const oldPlaylist = playlist;
                 playlist = data.playlist;
+                // Preserve nextTrack
+                if (nextTrack) {
+                    const oldNextTrackIndex = oldPlaylist.indexOf(nextTrack);
+                    if (oldNextTrackIndex !== -1) {
+                        nextTrack = playlist[oldNextTrackIndex];
+                    }
+                }
                 applyFilters();
                 showToast(`Rating updated to: ${data.updatedRating}`);
-                playNextTrack();
+                // Play next track if the rating was 2 or below
+                if (shouldPlayNextAfterRating) {
+                    playNextTrack();
+                    shouldPlayNextAfterRating = false; // Reset the flag
+                }
                 break;
             case 'play':
                 if (currentTrack) audioPlayer.play();
@@ -379,6 +556,14 @@ function connectWebSocket() {
     };
 }
 
+
+function updateReloadProgress(progress) {
+    // Update the UI to show the reload progress
+    // This could be a progress bar or a text update
+    console.log(`Library reload progress: ${progress}%`);
+    // TODO: Update the UI element that shows the progress
+}
+
 // Initialize rating slider
 document.addEventListener('DOMContentLoaded', function() {
     const slider = document.getElementById('ratingSlider');
@@ -386,6 +571,12 @@ document.addEventListener('DOMContentLoaded', function() {
     value.textContent = slider.value;
     slider.oninput = function() {
         value.textContent = this.value;
+    }
+    
+    // Add event listener for the reload library button
+    const reloadLibraryBtn = document.getElementById('reloadLibraryBtn');
+    if (reloadLibraryBtn) {
+        reloadLibraryBtn.addEventListener('click', reloadLibrary);
     }
 });
 
